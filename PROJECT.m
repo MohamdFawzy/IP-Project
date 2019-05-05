@@ -1,0 +1,460 @@
+
+%Project Name : Calculating Resistance Vlaue based on Color Bands
+%Team : X-ohm
+%-------------
+%this code consists of 3 functions : * main function , *function to enable
+%user to extract resistance body only from image by freehandDrawing
+%,*function to calculate mean value of L,a,b of masked image
+%-------------
+%this code is for calculating resistance value of 4 bands only 
+%input image should be captured properly and from a suitable short distance
+%and in a good lighting .
+%-------------
+%main function is divided into following sections (indicating the Algorithm
+%we followed) :
+%1-General Initializations
+%2-Image Segmentation and Applying mask on each Color Band of resistor.
+%3-Color Detection of each band.
+%4-Detect the order of bands.
+%5-Calculate Resistance Value based on colors and its order.
+%-------------
+%>>>>>>>>>>OUTPUT OF THE CODE CAN BE VIEWED IN COMMAND WINDOW<<<<<<<<<<<<<<
+%>>>>>>>>>>>>>>>>>>>>RESISTANCE-VALUE AND COLORS<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+function main()    
+close all;
+    clear
+    %%
+    %>>>>>>>>>>>>>>>>>SECTION (1)<<<<<<<<<<<<<<<
+    %>>>>>>>>>>General Initializations<<<<<<<<<<
+    
+	fontSize = 14;
+    %----
+    %dimension of crop image
+    width = 3 ;
+    height = 3 ;
+    %----
+    %standard value of colors and its names , will be used in comparing
+    %with output colors of bands later .
+    std_colors_code_HSV = [ [0,1,0] ; [1,0.44,0.35] ; [1,1,1] ; [0.11,1,1] ; [0.17,1,1] ; [0.33,0.98,0.5] ; [0.616,0.92,0.47] ; [0.84,0.99,0.5] ; [0.83,0.02,0.51] ; [0.9,0,1] ] ;
+    std_colors_code_names = [string('black') , string('brown') ,string('red') , string('orange') , string('yellow') ,string('green') , string('blue') , string('violet') , string('gray') , string('white')] ; 
+    %----                   
+	figure;
+	% Maximize the figure. 
+	set(gcf, 'Position', get(0, 'ScreenSize')); 
+    %%
+    %>>>>>>>>>>>>>>>>>>>>>>>>>>>SECTION (2)<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    %>>>Image Segmentation and Applying mask on each Color Band of res<<<
+    %----
+    % Ask user to choose resistor image from PC
+	message = sprintf('choose your resistor image');
+	reply2 = questdlg(message, 'Welcome', 'browse','cancel', 'Demo');
+    if strcmpi(reply2, 'browse')
+        originalFolder = pwd; 
+		folder = fullfile(matlabroot, '\toolbox\images\imdemos');
+		if ~exist(folder, 'dir') 
+			folder = pwd; 
+		end 
+		cd(folder); 
+		% Browse for the image file. 
+		[baseFileName, folder] = uigetfile('*.*', 'Specify an image file'); 
+		fullImageFileName = fullfile(folder, baseFileName); 
+		% Set current folder back to the original one. 
+		cd(originalFolder);
+    end
+    %----
+    %Reading Image in Matlab
+    [rgbImage storedColorMap] = imread(fullImageFileName); 
+	[rows columns numberOfColorBands] = size(rgbImage); 
+	% Display the original image.
+	h1 = subplot(3, 4, 1);
+	imshow(rgbImage);
+	drawnow; % Make it display immediately. 
+    %----
+    %draw mask by FreeHand on resistance body
+	mask = DrawFreehandRegion(h1, rgbImage); %calling to Function (2)
+	% Apply the Mask to image.
+	maskedRgbImage = bsxfun(@times, rgbImage, cast(mask, class(rgbImage)));
+    %----
+    %the Algorithm here is to convert the masked image to LAB color-space
+    %and calculate the mean value of L,A,B for all pixels . Normally , mean
+    %value will be biased towards the resistor background color because res
+    %background color is the major color . so afterthat when we calculate
+    %the DeltaE between mean color and every single pixel , the value of
+    %DeltaE will be lowest for background color and will be larger for
+    %every thing else . so, when imshow DeltaE in image the background
+    %color will be dark and bands will be brighter and we can apply
+    %suitable threshold to get binary image and use it to mask the original
+    %RGB-image .
+    
+	% Convert image from RGB colorspace to lab color space.
+	cform = makecform('srgb2lab');
+	lab_Image = applycform(im2double(rgbImage),cform);
+	
+	% Extract out the color bands from the original image
+	% into 3 separate 2D arrays, one for each color component.
+	LChannel = lab_Image(:, :, 1); 
+	aChannel = lab_Image(:, :, 2); 
+	bChannel = lab_Image(:, :, 3); 
+	
+	% Display the lab images.
+	subplot(3, 4, 2);
+	imshow(LChannel, []);
+	title('L Channel', 'FontSize', fontSize);
+	subplot(3, 4, 3);
+	imshow(aChannel, []);
+	title('a Channel', 'FontSize', fontSize);
+	subplot(3, 4, 4);
+	imshow(bChannel, []);
+	title('b Channel', 'FontSize', fontSize);
+	% Get the average lab color value.(call to function (3))
+	[LMean, aMean, bMean] = GetMeanLABValues(LChannel, aChannel, bChannel, mask);
+	
+	% Make uniform images of only that one single LAB color.
+	LStandard = LMean * ones(rows, columns);
+	aStandard = aMean * ones(rows, columns);
+	bStandard = bMean * ones(rows, columns);
+	
+	% Create the delta images: delta L, delta A, and delta B.
+	deltaL = LChannel - LStandard;
+	deltaa = aChannel - aStandard;
+	deltab = bChannel - bStandard;
+	
+	% Create the Delta E image.
+	% This is an image that represents the color difference.
+	% Delta E is the square root of the sum of the squares of the delta images.
+	deltaE = sqrt(deltaL .^ 2 + deltaa .^ 2 + deltab .^ 2);
+	
+	% Mask it to get the Delta E in the mask region only.
+	maskedDeltaE = deltaE .* mask;
+	% Get the mean delta E in the mask region
+ 	meanMaskedDeltaE = mean(deltaE(mask));	
+	
+	% Display the masked Delta E image - the delta E within the masked region only.
+	subplot(3, 4, 5);
+	imshow(maskedDeltaE, []);
+	caption = sprintf('Delta E between image within masked region\nand mean color within masked region.\n(With amplified intensity)');
+	title(caption, 'FontSize', fontSize);
+	% Display the Delta E image - the delta E over the entire image.
+	subplot(3, 4, 6);
+	imshow(deltaE, []);
+	caption = sprintf('Delta E Image\n(Darker = Better Match)');
+	title(caption, 'FontSize', fontSize);
+    
+    %----
+    %Global thresholding the masked_deltaE_image to eliminate the background of
+    %resistor body and leave the color bands only
+    maskedDeltaE_binary = maskedDeltaE > 20 ;
+    %apply erosion to eliminate undesired small spots in mask
+    maskedDeltaE_binary = imerode( maskedDeltaE_binary , strel('rectangle',[20 5]));
+    %apply dilation to close holes and or better regular mask
+    maskedDeltaE_binary = imdilate(maskedDeltaE_binary, strel('rectangle',[10 2]));
+    imshow(maskedDeltaE_binary, []);
+    
+    %after getting one masked image on 3 color bands , we need to separet them
+    %in 3 images , each contains 1 color band .
+    %use 'bwconncomp' function to detect all connected objects in the
+    %binary image 
+    CC = bwconncomp(maskedDeltaE_binary);
+    numPixels = cellfun(@numel,CC.PixelIdxList);
+    %sort the connected objects , larger connected objects will indicate
+    %the mask on color bands 
+    [biggest,idx] = sort(numPixels ,  'descend');
+
+    %here we create binary image and assign it to zeros , then we use the
+    %output of 'CC' to access each object and assign it to 1 so that we can
+    %obtain binary image containing ones on one color band only then we do
+    %the mask .
+    %we repeat this 3 times to obtain 3 images each of them contains
+    %diffreent single color band
+    maskedDeltaE_binary = (zeros(size(rgbImage,1),size(rgbImage,2)));
+    maskedDeltaE_binary(CC.PixelIdxList{idx(1,1)}) = 1 ;
+    centers(1) = regionprops(maskedDeltaE_binary,'Centroid'); %this line extracts the centroid of each object (also centroid of each color band) this will be useful later to determine the order of color bands .
+    subplot(3, 4, 7);
+    color_bands(:,:,:,1) = bsxfun(@times, rgbImage, cast(maskedDeltaE_binary,class(rgbImage))); 
+    imshow(color_bands(:,:,:,1), []);
+    caption = sprintf('(Mask on color band 1)');
+	title(caption, 'FontSize', fontSize);
+    
+    maskedDeltaE_binary = (zeros(size(rgbImage,1),size(rgbImage,2)));
+    maskedDeltaE_binary(CC.PixelIdxList{idx(1,3)}) = 1 ;
+    centers(2) = regionprops(maskedDeltaE_binary,'Centroid');
+    color_bands(:,:,:,2) = bsxfun(@times, rgbImage, cast(maskedDeltaE_binary,class(rgbImage))); 
+    subplot(3, 4, 8);
+    imshow(color_bands(:,:,:,2), []);
+    caption = sprintf('(Mask on color band 2)');
+	title(caption, 'FontSize', fontSize);
+    
+    maskedDeltaE_binary = (zeros(size(rgbImage,1),size(rgbImage,2)));
+    maskedDeltaE_binary(CC.PixelIdxList{idx(1,2)}) = 1 ;
+    centers(3) = regionprops(maskedDeltaE_binary,'Centroid');
+    color_bands(:,:,:,3) = bsxfun(@times, rgbImage, cast(maskedDeltaE_binary,class(rgbImage))); 
+    subplot(3, 4, 9);
+    imshow(color_bands(:,:,:,3), []);
+    caption = sprintf('(Mask on color band 3)');
+	title(caption, 'FontSize', fontSize);
+    %%
+    %>>>>>>>>>>>>>>>>>>>>SECTION (3)<<<<<<<<<<<<<<<<<<<<<
+    %>>>>>>>>>>>>Color Detection of each band<<<<<<<<<<<<
+    for i = 1 : 3
+        %use the centroid to crop a small rectangle containing the color
+        xMin = centers(i).Centroid(1,1) - floor(height/2);
+        yMin = centers(i).Centroid(1,2) - floor(width/2);
+        X_centroids(1,i) = centers(i).Centroid(1,1) ;
+        croppedRgb = imcrop(color_bands(:,:,:,i) , [xMin, yMin, width, height]);
+        subplot(3, 4, 9+i);
+        imshow(croppedRgb, []);
+        %convert to HSV color-space , we do so because it is less sensitive
+        %to changes in illumination 
+        croppedHSV = rgb2hsv(croppedRgb);
+        %calculate mean value in each small colored rectangle to obtain
+        %single H S V value of the color
+        m = mean(croppedHSV);
+        color = mean(m , 2);
+        %compare each color with standard ten colors saved in
+        %'std_colors_code_HSV' matrix , we calculate the square root of
+        %(differnce in H and S)squared and save the value in (3*10 compare
+        %matrix) each row contains the difference value for each color with
+        %the 10 colors
+        for j = 1 : 10
+            comp(i,j) = sqrt(((std_colors_code_HSV(j,1) - color(1)).^2) + ((std_colors_code_HSV(j,2) - color(2)).^2));
+        end
+    end
+    %-----
+    %extract min. value in each raw in compare matrix which indicates the
+    %closest color within the standard 10 colors used in resistance value
+    %calculation , and index of min value will be used to determine color
+    %name from (std_colors_code_names) matrix .
+    
+    [M , N] = min(comp,[],2);          %this return min value in each raw and column number
+    
+    %save the color names in (colors 1*3 matrix) by accessing (std_colors_code_names) matrix using the index of min value in comp matrix 
+    colors(1) = std_colors_code_names(1,N(1));
+    colors(2) = std_colors_code_names(1,N(2));
+    colors(3) = std_colors_code_names(1,N(3));
+    %%
+    %>>>>>>>>>>>>>>SECTION (4)<<<<<<<<<<<<<<<<<<<
+    %>>>>>>>>>Detect the order of bands<<<<<<<<<<
+    
+    %based on the value of X-coordinates in Centroids of bands , we order
+    %the colors to be ready for Calculation 
+    if ((X_centroids(1,1) < X_centroids(1,2)) && X_centroids(1,1) < X_centroids(1,3))
+    else
+        if X_centroids(1,1) < X_centroids(1,2)
+            if X_centroids(1,1) > X_centroids(1,3)
+                swap = colors(3);
+                colors(3) = colors(2);
+                colors(2) = swap ;
+                swap = colors(2);
+                colors(2) = colors(1);
+                colors(1) = swap ; 
+            elseif X_centroids(1,2) > X_centroids(1,3)
+                swap = colors(3);
+                colors(3) = colors(1);
+                colors(1) = swap ;
+            end 
+            
+        else
+            if X_centroids(1,1) > X_centroids(1,3)
+                if X_centroids(1,2) > X_centroids(1,3)
+                    swap = colors(3);
+                    colors(3) = colors(1);
+                    colors(1) = swap ;
+                else
+                    swap = colors(3);
+                    colors(3) = colors(1);
+                    colors(1) = swap ;
+                    swap = colors(2);
+                    colors(2) = colors(3);
+                    colors(3) = swap ;
+                end
+            else
+                swap = colors(2);
+                colors(2) = colors(1);
+                colors(1) = swap ;
+            end
+        
+        end
+    end
+    if X_centroids(1,2) > X_centroids(1,3)
+        swap = colors(2);
+        colors(2) = colors(3);
+        colors(3) = swap ;
+    end
+    colors
+    %%
+    %>>>>>>>>>>>>>>>>>>>>>>>>>>>SECTION (5)<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    %>>>>>Calculate Resistance Value based on colors and its order<<<<<
+    
+    % Initialize and save resistor value
+    value1='0';
+    value2='0';
+    value3='0';
+    value4='0';
+
+    switch colors(1)
+        case 'black'
+            value1='0';
+        case 'brown'
+            value1='1';
+        case 'red'
+            value1='2';
+        case 'orange'
+            value1='3';
+        case 'yellow'
+            value1='4';
+        case 'green'
+            value1='5';
+        case 'blue'
+            value1='6';
+        case 'violet'
+            value1='7';
+        case 'grey'
+            value1='8';
+        case 'white'
+            value1='9';
+    end
+%------
+    switch colors(2)
+        case 'black'
+            value2='0';
+        case 'brown'
+            value2='1';
+        case 'red'
+            value2='2';
+        case 'orange'
+            value2='3';
+        case 'yellow'
+            value2='4';
+        case 'green'
+            value2='5';
+        case 'blue'
+            value2='6';
+        case 'violet'
+            value2='7';
+        case 'grey'
+            value2='8';
+        case 'white'
+            value2='9';
+    end
+%------
+    switch colors(3)
+         case 'black'
+            value3=1;
+         case 'brown'
+            value3=10;
+        case 'red'
+            value3=100;
+        case 'orange'
+            value3=1000;
+        case 'yellow'
+            value3=10000;
+        case 'green'
+            value3=100000;
+        case 'blue'
+            value3=1000000;
+        case 'violet'
+            value3=10000000;
+        case 'grey'
+            value3=100000000;
+        case 'white'
+            value3=1000000000;
+    end
+
+%------
+    value1=strcat(value1,value2);
+    value1=str2num(value1);
+    res=value1*value3;
+    val1=fix(value1/10);
+    bs1 = num2str(val1);
+    bs2 =value2;
+
+    switch value3
+        case 1e2
+            b_str = [bs1 '.' bs2 ' K'];
+        case 1e3
+            b_str = [bs1 bs2 ' K'];
+        case 1e4
+            b_str = [bs1 bs2 '0 K'];        
+        case 1e5
+            b_str = [bs1 '.' bs2 ' M'];
+        case 1e6
+            b_str = [bs1 bs2 ' M'];
+        case 1e7
+            b_str = [bs1 bs2 '0 M'];
+        case 1e8
+            b_str = [bs1 '.' bs2 ' G'];
+        case 1e9
+            b_str = [bs1 bs2 ' G'];
+    end 
+    
+    Resistance_Value = b_str
+    
+%%
+return
+
+function [mask] = DrawFreehandRegion(handleToImage, rgbImage)
+try
+	fontSize = 14;
+	% Open a temporary full-screen figure if requested.
+	enlargeForDrawing = true;
+	axes(handleToImage);
+	if enlargeForDrawing
+		hImage = findobj(gca,'Type','image');
+		numberOfImagesInside = length(hImage);
+		if numberOfImagesInside > 1
+			imageInside = get(hImage(1), 'CData');
+		else
+			imageInside = get(hImage, 'CData');
+		end
+		hTemp = figure;
+		hImage2 = imshow(imageInside, []);
+		[rows columns NumberOfColorBands] = size(imageInside);
+		set(gcf, 'Position', get(0,'Screensize')); % Maximize figure.
+    end
+    
+	
+	message = sprintf('Left click and hold to begin drawing.\nSimply lift the mouse button to finish');
+	text(10, 40, message, 'color', 'r', 'FontSize', fontSize);
+    % Prompt user to draw a region on the image.
+	uiwait(msgbox(message));
+	
+	% Now, finally, have the user freehand draw the mask in the image.
+	hFH = imfreehand();
+	% Once we get here, the user has finished drawing the region.
+	% Create a binary image ("mask") from the ROI object.
+	mask = hFH.createMask();
+	
+	% Close the maximized figure because we're done with it.
+	close(hTemp);
+	% Display the freehand mask.
+	subplot(3, 4, 5);
+	imshow(mask);
+	title('Binary mask of the region', 'FontSize', fontSize);
+	
+	% Mask the image.
+	maskedRgbImage = bsxfun(@times, rgbImage, cast(mask,class(rgbImage)));
+	% Display it.
+	subplot(3, 4, 6);
+	imshow(maskedRgbImage);
+catch ME
+	errorMessage = sprintf('Error running DrawFreehandRegion:\n\n\nThe error message is:\n%s', ...
+		ME.message);
+	WarnUser(errorMessage);
+end
+return; % from DrawFreehandRegion
+
+function [LMean, aMean, bMean] = GetMeanLABValues(LChannel, aChannel, bChannel, mask)
+try
+	LVector = LChannel(mask); % 1D vector of only the pixels within the masked area.
+	LMean = mean(LVector);
+	aVector = aChannel(mask); % 1D vector of only the pixels within the masked area.
+	aMean = mean(aVector);
+	bVector = bChannel(mask); % 1D vector of only the pixels within the masked area.
+	bMean = mean(bVector);
+catch ME
+	errorMessage = sprintf('Error running GetMeanLABValues:\n\n\nThe error message is:\n%s', ...
+		ME.message);
+	WarnUser(errorMessage);
+end
+return; % from GetMeanLABValues
