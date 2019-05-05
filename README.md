@@ -1,2 +1,2 @@
 # IP-Project
- upload a project
+ digital image processing project using matlab
